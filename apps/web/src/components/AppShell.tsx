@@ -31,7 +31,10 @@ import type { CanvasViewport } from "../canvasSession";
 import { agentKindLabel, codingAgentModeLabel, reviewAgentModeLabel } from "../displayLabels";
 import { HierarchyTree } from "./HierarchyTree";
 import { Inspector } from "./Inspector";
-import { WorkspaceCanvas, type MemberLayout } from "./WorkspaceCanvas";
+import { WorkspaceCanvas, type MemberLayout, type ViewportController } from "./WorkspaceCanvas";
+import { VoiceControlButton } from "../voice/VoiceControlButton";
+import { VoiceConversationPanel } from "../voice/VoiceConversationPanel";
+import type { VoiceControlState } from "../voice/useVoiceControl";
 
 type AppShellProps = {
   selectedProject: Project | null;
@@ -114,6 +117,8 @@ type AppShellProps = {
   onRunReview: (runId: string) => void;
   onRunScanning: () => void;
   onCancelIndex: () => void;
+  onViewportControllerReady: (controller: ViewportController | null) => void;
+  voice: VoiceControlState;
 };
 
 export function AppShell({
@@ -191,7 +196,9 @@ export function AppShell({
   onCloseCodingWorkflow,
   onRunReview,
   onRunScanning,
-  onCancelIndex
+  onCancelIndex,
+  onViewportControllerReady,
+  voice
 }: AppShellProps) {
   const [query, setQuery] = useState("");
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -200,6 +207,7 @@ export function AppShell({
   const [resizingLeftPanel, setResizingLeftPanel] = useState(false);
   const [resizingRightPanel, setResizingRightPanel] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<"details" | "planning">("details");
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const resizeStartRef = useRef({ x: 0, width: DEFAULT_LEFT_PANEL_WIDTH });
   const rightResizeStartRef = useRef({ x: 0, width: DEFAULT_RIGHT_PANEL_WIDTH });
   const title = selectedProject?.name ?? "GraphCode";
@@ -325,6 +333,17 @@ export function AppShell({
               <FolderOpen size={16} />
               <span className="toolbar-label">Open workspace</span>
             </Button>
+          </span>
+          <span title="Voice control">
+            <VoiceControlButton
+              supported={voice.supported}
+              status={voice.status}
+              transcript={voice.transcript}
+              onToggle={() => {
+                voice.toggle();
+                setVoicePanelOpen(true);
+              }}
+            />
           </span>
           {selectedProject ? (
             <>
@@ -511,6 +530,7 @@ export function AppShell({
             onBoundaryDraft={onBoundaryDraft}
             onEdgeDraft={onEdgeDraft}
             onCancelDraw={onCancelDraw}
+            onViewportControllerReady={onViewportControllerReady}
           />
         )}
       </main>
@@ -629,6 +649,26 @@ export function AppShell({
           </div>
         )}
       </aside>
+      <VoiceConversationPanel
+        open={voicePanelOpen}
+        onClose={() => {
+          setVoicePanelOpen(false);
+          voice.stop();
+        }}
+        supported={voice.supported}
+        status={voice.status}
+        transcript={voice.transcript}
+        listening={voice.listening}
+        conversation={voice.conversation}
+        clearConversation={voice.clearConversation}
+        toggle={voice.toggle}
+        stop={voice.stop}
+        engine={voice.engine}
+        setEngine={voice.setEngine}
+        deepgramConfigured={voice.deepgramConfigured}
+        language={voice.language}
+        setLanguage={voice.setLanguage}
+      />
     </div>
   );
 }

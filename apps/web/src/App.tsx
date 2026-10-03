@@ -4,6 +4,7 @@ import type {
   BoundaryUpdate,
   CanvasGraph,
   CodingAgentMode,
+  ControlCommand,
   CodingWorkflow,
   CodingWorkflowExecutionPolicy,
   CodingWorkflowPartitionConstraints,
@@ -29,7 +30,8 @@ import type {
   WorkspaceSettings,
   WorkspaceSettingsMutation,
   SettingsValidationResult,
-  TagAssignment
+  TagAssignment,
+  VoiceLanguage
 } from "@graphcode/graph-model";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -93,6 +95,13 @@ import {
   type CanvasViewport
 } from "./canvasSession";
 import { nodePalette } from "./graphStyles";
+import type { ViewportController } from "./components/WorkspaceCanvas";
+import { contextFeedback } from "./voice/commands";
+import { controlCommandToInvocation } from "./voice/controlCommandMap";
+import { speak } from "./voice/feedback";
+import { requiresProjectByKind } from "./voice/types";
+import { useVoiceControl } from "./voice/useVoiceControl";
+import { runCommand, syncCommandCenter, type CommandResult } from "./commands";
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -152,6 +161,7 @@ export default function App() {
   const undoStackRef = useRef<UndoEntry[]>([]);
   const undoingRef = useRef(false);
   const scanningRunStatusRef = useRef<string | null>(null);
+  const viewportControllerRef = useRef<ViewportController | null>(null);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -1677,6 +1687,75 @@ export default function App() {
     }
   }, [selectedProjectId]);
 
+  const handleViewportControllerReady = useCallback((controller: ViewportController | null) => {
+    viewportControllerRef.current = controller;
+  }, []);
+
+  const handleControlCommand = useCallback(
+    async (command: ControlCommand, ack: string, language: VoiceLanguage): Promise<CommandResult | undefined> => {
+      if (requiresProjectByKind[command.kind] && !selectedProjectId) {
+        speak(contextFeedback.missingProject(language), language);
+        return undefined;
+      }
+      const invocation = controlCommandToInvocation(command);
+      speak(ack, language);
+      const result = await runCommand(invocation.name, invocation.args);
+      speak(result.summary, language);
+      return result;
+    },
+    [selectedProjectId]
+  );
+
+  useEffect(() => {
+    syncCommandCenter(
+      {
+        openWorkspaceRequest: handleOpenWorkspaceRequest,
+        openWorkspacePicker: handleOpenWorkspacePicker,
+        selectNode: handleCanvasNodeSelect,
+        runScanning: handleRunScanning,
+        runPlanning: handleRunPlanning,
+        startCode: handleStartCode,
+        runReview: handleRunReview,
+        applyPlanningPatch: handleApplyPlanningPatch,
+        implementCodeProposal: handleImplementCodeProposal,
+        codingControl: handleCodingWorkflowControl,
+        autoLayout: handleAutoLayout,
+        showFullGraph: handleShowFullGraph,
+        refresh: handleRefresh,
+        openSettings: () => setSettingsOpen(true),
+        resetWorkspace: handleResetSelfWorkspace,
+        viewport: (action, direction) => {
+          if (action === "show-full") {
+            void handleShowFullGraph();
+          } else if (action === "pan") {
+            viewportControllerRef.current?.pan(direction ?? "up");
+          } else if (action === "zoom-in") {
+            viewportControllerRef.current?.zoomIn();
+          } else if (action === "zoom-out") {
+            viewportControllerRef.current?.zoomOut();
+          } else {
+            viewportControllerRef.current?.fitView();
+          }
+        }
+      },
+      {
+        projectId: selectedProjectId,
+        projectName: canvas?.project.name ?? null,
+        selectedNodeId,
+        scopeNodeId: canvas?.scopeNodeId ?? null,
+        nodes: canvas?.nodes.map((node) => ({ id: node.id, name: node.name })) ?? [],
+        agentRuns,
+        hasActiveCodingWorkflow: !!codingWorkflow
+      }
+    );
+  });
+
+  const voice = useVoiceControl({
+    projectId: selectedProjectId,
+    onCommand: handleControlCommand,
+    shouldStart: () => !isEditableTarget(document.activeElement)
+  });
+
   useEffect(() => {
     void refreshAgentState();
   }, [refreshAgentState]);
@@ -1793,6 +1872,8 @@ export default function App() {
         onRunReview={handleRunReview}
         onRunScanning={handleRunScanning}
         onCancelIndex={() => void handleCancelIndex()}
+        onViewportControllerReady={handleViewportControllerReady}
+        voice={voice}
       />
       {settingsOpen && selectedProject && settings ? (
         <SettingsPage

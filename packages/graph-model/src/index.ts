@@ -1233,6 +1233,39 @@ export const openWorkspaceSchema = z.object({
   initialization: z.union([workspaceInitializationSchema, blankWorkspaceInitializationSchema]).optional()
 });
 
+export const controlCommandViewportActionSchema = z.enum(["zoom-in", "zoom-out", "fit", "show-full", "pan"]);
+export const controlCommandPanDirectionSchema = z.enum(["up", "down", "left", "right"]);
+export const controlCommandCodingActionSchema = z.enum(["pause", "resume", "cancel"]);
+export const controlCommandSystemActionSchema = z.enum(["settings", "refresh", "open-workspace", "reset-workspace"]);
+export const controlCommandSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("viewport"),
+    action: controlCommandViewportActionSchema,
+    direction: controlCommandPanDirectionSchema.optional()
+  }),
+  z.object({ kind: z.literal("ai-planning"), prompt: z.string() }),
+  z.object({ kind: z.literal("ai-scan") }),
+  z.object({ kind: z.literal("ai-review") }),
+  z.object({ kind: z.literal("ai-start-code"), prompt: z.string().optional(), targetNodeId: z.string().optional() }),
+  z.object({ kind: z.literal("auto-layout") }),
+  z.object({ kind: z.literal("coding-control"), action: controlCommandCodingActionSchema }),
+  z.object({ kind: z.literal("system"), action: controlCommandSystemActionSchema })
+]);
+export type ControlCommand = z.infer<typeof controlCommandSchema>;
+export const voiceLanguageSchema = z.enum(["zh-CN", "en-US"]);
+export type VoiceLanguage = z.infer<typeof voiceLanguageSchema>;
+export const voiceInterpretRequestSchema = z.object({
+  text: z.string().min(1),
+  language: voiceLanguageSchema.optional().default("zh-CN"),
+  projectId: z.string().optional()
+});
+export type VoiceInterpretRequest = z.infer<typeof voiceInterpretRequestSchema>;
+export type VoiceInterpretResponse = { command: ControlCommand | null; reason?: "no-provider" };
+
+export type DeepgramVoiceTokenResponse =
+  | { configured: false }
+  | { configured: true; accessToken: string; expiresIn: number };
+
 export type OpenWorkspaceResult =
   | {
       status: "opened" | "created";

@@ -18,6 +18,7 @@ import {
   type AgentProvider,
   type AgentRun,
   type AgentStatus,
+  type ControlCommand,
   type BlockExecutionMetadata,
   type CanvasGraph,
   CLAUDE_REASONING_EFFORTS,
@@ -49,6 +50,7 @@ import {
   type ScanningAgentRequest,
   type ScanningAgentConfig,
   type ScanningAgentMode,
+  controlCommandSchema,
   graphEdgeKindSchema,
   graphNodeKindSchema,
   ioKindSchema,
@@ -434,6 +436,69 @@ export async function runPlanningAgent(input: PlanningChatRequest, options: Agen
       };
     }
   });
+}
+
+export async function interpretControlCommand(input: {
+  text: string;
+  language: "zh-CN" | "en-US";
+  config: AgentConfig;
+  workspaceRoot?: string;
+}): Promise<ControlCommand | null> {
+  if (input.config.provider === "fake") {
+    return null;
+  }
+  const provider = createProvider(input.config, input.workspaceRoot);
+  const response = await provider.invoke([
+    {
+      role: "system",
+      content: resolveSystemPrompt(
+        input.config,
+        "Classify the user's spoken command into a structured control command. Respond with ONLY a JSON object and nothing else. If the utterance does not match any supported control, respond with {\"unknown\":true}."
+      )
+    },
+    {
+      role: "user",
+      content: [
+        `Language: ${input.language}`,
+        `Spoken: ${input.text}`,
+        "",
+        "Return exactly one of these JSON shapes:",
+        '{"kind":"viewport","action":"zoom-in"|"zoom-out"|"fit"|"show-full"|"pan","direction":"up"|"down"|"left"|"right"}',
+        '{"kind":"ai-planning","prompt":"the requested plan"}',
+        '{"kind":"ai-scan"}',
+        '{"kind":"ai-review"}',
+        '{"kind":"ai-start-code","prompt":"optional coding instruction"}',
+        '{"kind":"auto-layout"}',
+        '{"kind":"coding-control","action":"pause"|"resume"|"cancel"}',
+        '{"kind":"system","action":"settings"|"refresh"|"open-workspace"|"reset-workspace"}',
+        '{"unknown":true}'
+      ].join("\n")
+    }
+  ]);
+  const parsed = extractJsonObject(response);
+  if (!parsed || (parsed as { unknown?: boolean }).unknown === true) {
+    return null;
+  }
+  const result = controlCommandSchema.safeParse(parsed);
+  return result.success ? result.data : null;
+}
+
+function extractJsonObject(text: string): unknown {
+  const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      return null;
+    }
+    try {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
 }
 
 export async function runCodingAgent(input: CodingAgentRequest, options: AgentRuntimeOptions): Promise<AgentResult> {
